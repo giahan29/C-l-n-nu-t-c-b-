@@ -1,0 +1,932 @@
+export type GameDifficulty = 'medium' | 'hard'; // 'Vừa' hoặc 'Khó'
+
+export interface Question {
+  id: string;
+  question: string;
+  englishPhrase?: string;
+  options: [string, string, string, string];
+  correctIndex: number;
+  explanation: string;
+  category: 'Từ vựng (Vocabulary)' | 'Ngữ pháp (Grammar)' | 'Giao tiếp (Speaking)' | 'Thành ngữ (Idiom)' | 'Thế giới đại dương (Ocean Trivia)';
+  difficulty: 'Dễ' | 'Trung bình' | 'Thử thách';
+}
+
+export type FishType = 'small' | 'medium' | 'big' | 'boss';
+
+export interface FishDefinition {
+  id: string;
+  name: string;
+  vietnameseName: string;
+  src: string;
+  tier: number; // 1 to 4
+  baseWidth: number;
+  baseHeight: number;
+  description: string;
+  isBigPredator: boolean;
+  scoreValue: number;
+  tolerance?: number;
+}
+
+export interface FishEntity {
+  id: number;
+  definitionId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
+  facing: 'left' | 'right';
+  tier: number;
+  speed: number;
+  wigglePhase: number;
+  wiggleSpeed: number;
+  isBigPredator: boolean;
+  scoreValue: number;
+  mouthOpen: number; // 0 đến 1 cho animation đớp mồi
+  targetY?: number;
+  isFleeing?: boolean;
+  hasQuiz?: boolean; // Chú cá mang câu đố tiếng Anh
+  rotation?: number;
+}
+
+export interface Obstacle {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  type: 'urchin' | 'jellyfish' | 'mine';
+  rotation: number;
+  rotationSpeed: number;
+  pulsePhase: number;
+  damage: number;
+}
+
+export interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  alpha: number;
+  color: string;
+  type: 'bubble' | 'sparkle' | 'crumb' | 'star' | 'electric' | 'smoke';
+  life: number;
+  maxLife: number;
+}
+class SoundEffectsManager {
+  private ctx: AudioContext | null = null;
+  private isMuted: boolean = false;
+  private volume: number = 0.8;
+  private ambientGain: GainNode | null = null;
+  private isAmbientPlaying: boolean = false;
+
+  private initContext() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AudioCtx();
+    }
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  public setMuted(muted: boolean) {
+    this.isMuted = muted;
+    if (this.ambientGain) {
+      this.ambientGain.gain.setValueAtTime(muted ? 0 : 0.08 * this.volume, this.ctx?.currentTime || 0);
+    }
+  }
+
+  // Âm đớp mồi "Nom-Nom-Chomp" hài hước
+  public playChomp(variant: number = 0) {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const masterGain = this.ctx.createGain();
+    masterGain.gain.setValueAtTime(0.5 * this.volume, t);
+    masterGain.connect(this.ctx.destination);
+
+    const baseFreq = 260 + (variant % 3) * 60 + Math.random() * 40;
+
+    const osc1 = this.ctx.createOscillator();
+    const g1 = this.ctx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(baseFreq * 1.5, t);
+    osc1.frequency.exponentialRampToValueAtTime(baseFreq * 0.7, t + 0.08);
+    g1.gain.setValueAtTime(0.7, t);
+    g1.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+    osc1.connect(g1);
+    g1.connect(masterGain);
+    osc1.start(t);
+    osc1.stop(t + 0.09);
+
+    const osc2 = this.ctx.createOscillator();
+    const g2 = this.ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(baseFreq * 2.2, t + 0.07);
+    osc2.frequency.exponentialRampToValueAtTime(baseFreq * 0.9, t + 0.16);
+    g2.gain.setValueAtTime(0.01, t);
+    g2.gain.setValueAtTime(0.9, t + 0.07);
+    g2.gain.exponentialRampToValueAtTime(0.01, t + 0.17);
+    osc2.connect(g2);
+    g2.connect(masterGain);
+    osc2.start(t + 0.07);
+    osc2.stop(t + 0.18);
+  }
+
+  public playBloop() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    const startFreq = 400 + Math.random() * 200;
+    osc.frequency.setValueAtTime(startFreq, t);
+    osc.frequency.exponentialRampToValueAtTime(startFreq * 2.3, t + 0.1);
+    g.gain.setValueAtTime(0.35 * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.12);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.13);
+  }
+
+  public playCorrect() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    const t = this.ctx.currentTime;
+    notes.forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const noteTime = t + idx * 0.08;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, noteTime);
+      g.gain.setValueAtTime(0.4 * this.volume, noteTime);
+      g.gain.exponentialRampToValueAtTime(0.01, noteTime + 0.3);
+      osc.connect(g);
+      g.connect(this.ctx.destination);
+      osc.start(noteTime);
+      osc.stop(noteTime + 0.32);
+    });
+  }
+
+  public playWrong() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.exponentialRampToValueAtTime(140, t + 0.3);
+    osc.frequency.exponentialRampToValueAtTime(90, t + 0.6);
+    g.gain.setValueAtTime(0.5 * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.65);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.7);
+  }
+
+  public playLevelUp() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const freqs = [392, 523.25, 659.25, 783.99, 1046.5];
+    freqs.forEach((f, i) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const start = t + i * 0.07;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(f, start);
+      g.gain.setValueAtTime(0.45 * this.volume, start);
+      g.gain.exponentialRampToValueAtTime(0.01, start + 0.4);
+      osc.connect(g);
+      g.connect(this.ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.45);
+    });
+  }
+
+  public playUrchinHit() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(420, t);
+    osc.frequency.exponentialRampToValueAtTime(110, t + 0.25);
+    g.gain.setValueAtTime(0.5 * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.26);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.27);
+  }
+
+  public playJellyfishZap() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(800, t);
+    osc.frequency.linearRampToValueAtTime(1400, t + 0.08);
+    osc.frequency.linearRampToValueAtTime(400, t + 0.2);
+    g.gain.setValueAtTime(0.45 * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.22);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.23);
+  }
+
+  public playMineExplosion() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(35, t + 0.45);
+    g.gain.setValueAtTime(0.7 * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.48);
+    osc.connect(g);
+    g.connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.5);
+  }
+
+  public playQuizFound() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    [659.25, 783.99, 1046.5, 1318.5].forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const startTime = t + idx * 0.06;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      g.gain.setValueAtTime(0.4 * this.volume, startTime);
+      g.gain.exponentialRampToValueAtTime(0.01, startTime + 0.28);
+      osc.connect(g);
+      g.connect(this.ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.3);
+    });
+  }
+
+  public startAmbient() {
+    if (this.isAmbientPlaying) return;
+    this.initContext();
+    if (!this.ctx) return;
+    this.isAmbientPlaying = true;
+    this.ambientGain = this.ctx.createGain();
+    this.ambientGain.gain.setValueAtTime(this.isMuted ? 0 : 0.08 * this.volume, this.ctx.currentTime);
+    this.ambientGain.connect(this.ctx.destination);
+
+    const bubbleLoop = () => {
+      if (!this.isAmbientPlaying || !this.ctx || !this.ambientGain) return;
+      if (!this.isMuted && Math.random() < 0.6) {
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = 'sine';
+        const freq = 300 + Math.random() * 350;
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.6, t + 0.15);
+        g.gain.setValueAtTime(0.04 * this.volume, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        osc.connect(g);
+        g.connect(this.ambientGain);
+        osc.start(t);
+        osc.stop(t + 0.17);
+      }
+      setTimeout(bubbleLoop, 800 + Math.random() * 1200);
+    };
+    bubbleLoop();
+  }
+
+  // Phát âm tiếng Anh bản địa bằng SpeechSynthesis API
+  public speakWord(text: string) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9;
+    utterance.pitch = 1.05;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  public playClick() {
+    this.playBloop();
+  }
+}
+
+export const soundManager = new SoundEffectsManager();
+
+export interface FloatingText {
+  id: number;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+  vy: number;
+  scale: number;
+}
+import { FishDefinition } from '../types/game';
+
+export const FISH_DEFINITIONS: FishDefinition[] = [
+  {
+    id: 'crayon_blue',
+    name: 'Blue Crayon Fish',
+    vietnameseName: 'Cá Sáp Xanh Nhí',
+    src: '/assets/aistudio/image_722e59fa.png',
+    tier: 1,
+    baseWidth: 135,
+    baseHeight: 82,
+    description: 'Chú cá xanh vẽ sáp nghịch ngợm, bơi lội thoăn thoắt và lanh lợi.',
+    isBigPredator: false,
+    scoreValue: 25,
+    tolerance: 235
+  },
+  {
+    id: 'pastel_round',
+    name: 'Pastel Chubby Fish',
+    vietnameseName: 'Cá Tròn Bầu Pastel',
+    src: '/assets/aistudio/image_9658bbd5.png',
+    tier: 1,
+    baseWidth: 145,
+    baseHeight: 110,
+    description: 'Bé cá tròn xoe với vây cầu vồng đáng yêu, biểu cảm ngộ nghĩnh.',
+    isBigPredator: false,
+    scoreValue: 30,
+    tolerance: 238
+  },
+  {
+    id: 'rainbow_pencil',
+    name: 'Rainbow Pencil Fish',
+    vietnameseName: 'Cá Cầu Vồng Thon Thả',
+    src: '/assets/aistudio/image_e13ef172.png',
+    tier: 2,
+    baseWidth: 175,
+    baseHeight: 85,
+    description: 'Chú cá vảy sọc màu kỳ diệu với chiếc đuôi rực rỡ và mắt tròn tò mò.',
+    isBigPredator: false,
+    scoreValue: 45,
+    tolerance: 235
+  },
+  {
+    id: 'kiss_orange',
+    name: 'Golden Kiss Fish',
+    vietnameseName: 'Cá Vàng Mỏ Chu',
+    src: '/assets/aistudio/image_b6f274b2.png',
+    tier: 2,
+    baseWidth: 165,
+    baseHeight: 86,
+    description: 'Chú cá cam chu môi bơi tung tăng khắp các rạn san hô lộng lẫy.',
+    isBigPredator: false,
+    scoreValue: 40,
+    tolerance: 238
+  },
+  {
+    id: 'glitter_neon',
+    name: 'Glitter Neon Fish',
+    vietnameseName: 'Cá Hồng Dạ Quang',
+    src: '/assets/aistudio/image_cb5a2b0c.png',
+    tier: 3,
+    baseWidth: 185,
+    baseHeight: 112,
+    description: 'Cá màu hồng phát sáng rực rỡ dưới lòng đại dương sâu thẳm huyền ảo.',
+    isBigPredator: false,
+    scoreValue: 65,
+    tolerance: 240
+  },
+  {
+    id: 'cute_baby_shark',
+    name: 'Chubby Baby Shark',
+    vietnameseName: 'Bé Cá Mập Cute',
+    src: '/assets/cute_baby_shark.png',
+    tier: 3,
+    baseWidth: 260,
+    baseHeight: 195,
+    description: 'Bé cá mập con tròn xoe siêu cute, mắt long lanh!',
+    isBigPredator: true,
+    scoreValue: 150,
+    tolerance: 236
+  },
+  {
+    id: 'starry_shark',
+    name: 'Starry Ocean Shark',
+    vietnameseName: 'Cá Mập Tinh Tú Xanh',
+    src: '/assets/aistudio/image_b737d8ca.png',
+    tier: 3,
+    baseWidth: 320,
+    baseHeight: 185,
+    description: 'Cá mập đốm sao thủy cung bơi lội uyển chuyển lướt nhanh săn mồi.',
+    isBigPredator: true,
+    scoreValue: 150,
+    tolerance: 235
+  }
+];
+
+const processedCanvasCache = new Map<string, HTMLCanvasElement>();
+
+// Xử lý flood-fill loại bỏ viền trắng để ảnh trong suốt hoàn hảo trên Canvas
+export function removeOuterWhiteBackground(img: HTMLImageElement, tolerance: number = 235): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  ctx.drawImage(img, 0, 0);
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+  const width = canvas.width;
+  const height = canvas.height;
+
+  const isBg = new Uint8Array(width * height);
+  const queue: number[] = [];
+
+  const isNearWhite = (idx: number) => {
+    const r = data[idx * 4];
+    const g = data[idx * 4 + 1];
+    const b = data[idx * 4 + 2];
+    return r >= tolerance && g >= tolerance && b >= tolerance;
+  };
+
+  for (let x = 0; x < width; x++) {
+    const topIdx = x;
+    const botIdx = (height - 1) * width + x;
+    if (isNearWhite(topIdx)) { isBg[topIdx] = 1; queue.push(topIdx); }
+    if (isNearWhite(botIdx)) { isBg[botIdx] = 1; queue.push(botIdx); }
+  }
+  for (let y = 0; y < height; y++) {
+    const leftIdx = y * width;
+    const rightIdx = y * width + (width - 1);
+    if (!isBg[leftIdx] && isNearWhite(leftIdx)) { isBg[leftIdx] = 1; queue.push(leftIdx); }
+    if (!isBg[rightIdx] && isNearWhite(rightIdx)) { isBg[rightIdx] = 1; queue.push(rightIdx); }
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const curr = queue[head++];
+    const cx = curr % width;
+    const cy = Math.floor(curr / width);
+
+    const neighbors = [
+      cy > 0 ? (cy - 1) * width + cx : -1,
+      cy < height - 1 ? (cy + 1) * width + cx : -1,
+      cx > 0 ? cy * width + (cx - 1) : -1,
+      cx < width - 1 ? cy * width + (cx + 1) : -1,
+    ];
+
+    for (const n of neighbors) {
+      if (n !== -1 && !isBg[n] && isNearWhite(n)) {
+        isBg[n] = 1;
+        queue.push(n);
+      }
+    }
+  }
+
+  for (let i = 0; i < width * height; i++) {
+    if (isBg[i]) data[i * 4 + 3] = 0;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+export function loadFishSprite(definition: FishDefinition): Promise<HTMLCanvasElement> {
+  const cacheKey = definition.id;
+  if (processedCanvasCache.has(cacheKey)) {
+    return Promise.resolve(processedCanvasCache.get(cacheKey)!);
+  }
+
+  return new Promise<HTMLCanvasElement>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = definition.src;
+    img.onload = () => {
+      const processed = removeOuterWhiteBackground(img, definition.tolerance || 235);
+      processedCanvasCache.set(cacheKey, processed);
+      resolve(processed);
+    };
+    img.onerror = () => {
+      const fallback = document.createElement('canvas');
+      fallback.width = definition.baseWidth;
+      fallback.height = definition.baseHeight;
+      const fCtx = fallback.getContext('2d')!;
+      fCtx.fillStyle = '#1e3a8a';
+      fCtx.beginPath();
+      fCtx.ellipse(fallback.width / 2, fallback.height / 2, fallback.width / 2, fallback.height / 2, 0, 0, Math.PI * 2);
+      fCtx.fill();
+      processedCanvasCache.set(cacheKey, fallback);
+      resolve(fallback);
+    };
+  });
+}
+
+export function getLoadedSprite(id: string): HTMLCanvasElement | null {
+  return processedCanvasCache.get(id) || null;
+}
+
+export async function preloadAllFishSprites(): Promise<void> {
+  await Promise.all(FISH_DEFINITIONS.map((def) => loadFishSprite(def)));
+}
+import { Question } from '../types/game';
+
+export const INITIAL_QUESTIONS: Question[] = [
+  {
+    id: 'q1',
+    question: 'Trong tiếng Anh, con cá mập được gọi là gì?',
+    englishPhrase: 'Shark',
+    options: ['Shark', 'Whale', 'Dolphin', 'Jellyfish'],
+    correctIndex: 0,
+    explanation: '"Shark" có nghĩa là cá mập. "Whale" là cá voi, "Dolphin" là cá heo, "Jellyfish" là sứa.',
+    category: 'Từ vựng (Vocabulary)',
+    difficulty: 'Dễ'
+  },
+  {
+    id: 'q2',
+    question: 'Chọn từ đúng để hoàn thành câu: "A big fish can ______ smaller fish."',
+    englishPhrase: 'eat / swallow',
+    options: ['eats', 'eat', 'ate', 'eating'],
+    correctIndex: 1,
+    explanation: 'Sau động từ khiếm khuyết "can", ta dùng động từ nguyên mẫu không "to" -> "eat".',
+    category: 'Ngữ pháp (Grammar)',
+    difficulty: 'Dễ'
+  },
+  {
+    id: 'q3',
+    question: 'Thành ngữ "A fish out of water" có nghĩa là gì?',
+    englishPhrase: 'A fish out of water',
+    options: [
+      'Một người đang rất khát nước',
+      'Một người cảm thấy lạc lõng, bỡ ngỡ trong môi trường mới',
+      'Một con cá bơi rất giỏi',
+      'Một người thích đi câu cá'
+    ],
+    correctIndex: 1,
+    explanation: '"A fish out of water" ám chỉ người cảm thấy lạ lẫm, không thoải mái trong hoàn cảnh mới.',
+    category: 'Thành ngữ (Idiom)',
+    difficulty: 'Trung bình'
+  },
+  {
+    id: 'q4',
+    question: 'Động vật biển nào lớn nhất thế giới?',
+    englishPhrase: 'The Blue Whale',
+    options: ['Great White Shark', 'Blue Whale', 'Giant Squid', 'Killer Whale'],
+    correctIndex: 1,
+    explanation: '"Blue Whale" (Cá voi xanh) là sinh vật lớn nhất từng tồn tại trên Trái Đất.',
+    category: 'Thế giới đại dương (Ocean Trivia)',
+    difficulty: 'Dễ'
+  },
+  {
+    id: 'q5',
+    question: 'Từ nào sau đây có nghĩa là "rạn san hô"?',
+    englishPhrase: 'Coral reef',
+    options: ['Seaweed', 'Coral reef', 'Starfish', 'Seashell'],
+    correctIndex: 1,
+    explanation: '"Coral reef" là rạn san hô, môi trường sống phong phú bậc nhất của đại dương.',
+    category: 'Từ vựng (Vocabulary)',
+    difficulty: 'Dễ'
+  }
+];
+
+const STORAGE_KEY = 'fish_game_english_questions_v1';
+
+export function loadQuestions(): Question[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return INITIAL_QUESTIONS;
+}
+
+export function saveQuestions(questions: Question[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(questions));
+  } catch {}
+}
+import React, { useState, useEffect } from 'react';
+import { Question } from '../types/game';
+import { soundManager } from '../utils/audio';
+import confetti from 'canvas-confetti';
+import { Volume2, Sparkles, ArrowRight, Star, Flame, Frown } from 'lucide-react';
+
+interface QuestionModalProps {
+  question: Question;
+  preyName: string;
+  preySrc: string;
+  onAnswer: (isCorrect: boolean) => void;
+  livesRemaining: number;
+}
+
+export const QuestionModal: React.FC<QuestionModalProps> = ({
+  question,
+  preyName,
+  preySrc,
+  onAnswer,
+}) => {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [hasSubmitted, setHasSubmitted] = useState<boolean>(false);
+  const [timeLeft, setTimeLeft] = useState<number>(20);
+
+  useEffect(() => {
+    soundManager.playQuizFound();
+    if (question.englishPhrase) {
+      setTimeout(() => soundManager.speakWord(question.englishPhrase!), 500);
+    }
+  }, [question]);
+
+  useEffect(() => {
+    if (hasSubmitted) return;
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setHasSubmitted(true);
+          soundManager.playWrong();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [hasSubmitted]);
+
+  const handleSelectOption = (index: number) => {
+    if (hasSubmitted) return;
+    setSelectedIndex(index);
+    setHasSubmitted(true);
+    const isCorrect = index === question.correctIndex;
+    if (isCorrect) {
+      soundManager.playCorrect();
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    } else {
+      soundManager.playWrong();
+    }
+  };
+
+  const isCorrect = selectedIndex === question.correctIndex;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+      <div className="relative w-full max-w-xl bg-gradient-to-b from-sky-900/90 via-blue-950/95 to-indigo-950 border-4 border-amber-400 rounded-3xl shadow-2xl p-6 text-white">
+        <div className="flex items-center gap-4 pb-4 border-b border-sky-700/50">
+          <img src={preySrc} alt={preyName} className="w-16 h-16 object-contain animate-bounce" />
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-300">⭐ Cá Thông Thái!</span>
+              <span className="text-xs font-bold text-emerald-300">{timeLeft}s</span>
+            </div>
+            <h3 className="text-lg font-black">{preyName} mang câu đố!</h3>
+          </div>
+        </div>
+
+        <div className="my-4 p-4 bg-sky-950/60 rounded-2xl border border-sky-500/30">
+          {question.englishPhrase && (
+            <button
+              onClick={() => soundManager.speakWord(question.englishPhrase!)}
+              className="text-xs text-amber-300 flex items-center gap-1 mb-2 hover:underline cursor-pointer"
+            >
+              <Volume2 className="w-4 h-4" /> Nghe phát âm: "{question.englishPhrase}"
+            </button>
+          )}
+          <p className="font-bold text-base">{question.question}</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          {question.options.map((option, idx) => (
+            <button
+              key={idx}
+              disabled={hasSubmitted}
+              onClick={() => handleSelectOption(idx)}
+              className={`p-3 rounded-xl border text-left font-semibold cursor-pointer ${
+                hasSubmitted
+                  ? idx === question.correctIndex
+                    ? 'bg-emerald-600 border-emerald-400'
+                    : idx === selectedIndex
+                    ? 'bg-rose-600 border-rose-400'
+                    : 'bg-slate-900/50 border-slate-700 opacity-50'
+                  : 'bg-sky-900/40 hover:bg-sky-800 border-sky-600'
+              }`}
+            >
+              {['A', 'B', 'C', 'D'][idx]}. {option}
+            </button>
+          ))}
+        </div>
+
+        {hasSubmitted && (
+          <div className="p-3 bg-slate-900/80 rounded-xl mb-4 text-xs text-sky-100">
+            <strong>Giải thích:</strong> {question.explanation}
+          </div>
+        )}
+
+        {hasSubmitted && (
+          <button
+            onClick={() => onAnswer(isCorrect)}
+            className="w-full py-3 bg-amber-400 text-slate-950 rounded-xl font-black cursor-pointer hover:brightness-110 flex items-center justify-center gap-2"
+          >
+            Tiếp tục cuộc đi săn <ArrowRight className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+import React, { useState, useCallback, useRef } from 'react';
+import { GameCanvas } from './components/GameCanvas';
+import { GameHUD } from './components/GameHUD';
+import { QuestionModal } from './components/QuestionModal';
+import { QuestionBankModal } from './components/QuestionBankModal';
+import { CharacterSelectModal } from './components/CharacterSelectModal';
+import { GameOverModal } from './components/GameOverModal';
+import { Question, FishDefinition, GameDifficulty, Obstacle } from './types/game';
+import { loadQuestions, saveQuestions } from './data/defaultQuestions';
+import { FISH_DEFINITIONS } from './utils/imageLoader';
+import { soundManager } from './utils/audio';
+
+type GamePhase = 'select-character' | 'playing' | 'game-over';
+
+export default function App() {
+  const [questions, setQuestions] = useState<Question[]>(() => loadQuestions());
+  const [isQuestionBankOpen, setIsQuestionBankOpen] = useState(false);
+  const [selectedSharkId, setSelectedSharkId] = useState<string>('cute_baby_shark');
+  const [difficulty, setDifficulty] = useState<GameDifficulty>('medium');
+  const [gamePhase, setGamePhase] = useState<GamePhase>('select-character');
+
+  const [score, setScore] = useState<number>(0);
+  const [highScore, setHighScore] = useState<number>(0);
+  const [level, setLevel] = useState<number>(1);
+  const [growthProgress, setGrowthProgress] = useState<number>(0);
+  const [lives, setLives] = useState<number>(3);
+  const [boostStamina, setBoostStamina] = useState<number>(100);
+  const [isFrenzyActive, setIsFrenzyActive] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
+  const [caughtPrey, setCaughtPrey] = useState<{ name: string; src: string } | null>(null);
+
+  const handleStartGame = () => {
+    soundManager.startAmbient();
+    setScore(0);
+    setLevel(1);
+    setGrowthProgress(0);
+    setLives(3);
+    setBoostStamina(100);
+    setGamePhase('playing');
+  };
+
+  const handleQuizFishEaten = useCallback((preyDef: FishDefinition) => {
+    if (questions.length === 0) return;
+    const q = questions[Math.floor(Math.random() * questions.length)];
+    setCaughtPrey({ name: preyDef.vietnameseName, src: preyDef.src });
+    setActiveQuestion(q);
+  }, [questions]);
+
+  const handleAnswerQuestion = (isCorrect: boolean) => {
+    if (isCorrect) {
+      setScore((s) => s + 300);
+      setIsFrenzyActive(true);
+      setTimeout(() => setIsFrenzyActive(false), 6000);
+    }
+    setActiveQuestion(null);
+    setCaughtPrey(null);
+  };
+
+  const handleObstacleHit = useCallback((type: Obstacle['type']) => {
+    if (type === 'urchin' || type === 'mine') {
+      setLives((prev) => {
+        const remaining = prev - 1;
+        if (remaining <= 0) setGamePhase('game-over');
+        return remaining;
+      });
+    }
+  }, []);
+
+  return (
+    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 select-none">
+      <GameCanvas
+        selectedSharkId={selectedSharkId}
+        isPaused={isPaused || !!activeQuestion || isQuestionBankOpen || gamePhase !== 'playing'}
+        score={score}
+        level={level}
+        growthProgress={growthProgress}
+        isFrenzyActive={isFrenzyActive}
+        difficulty={difficulty}
+        onUpdateScore={(d) => setScore((s) => s + d)}
+        onUpdateGrowth={setGrowthProgress}
+        onLevelUp={() => setLevel((l) => Math.min(4, l + 1))}
+        onQuizFishEaten={handleQuizFishEaten}
+        onFishEaten={() => {}}
+        onObstacleHit={handleObstacleHit}
+        boostStamina={boostStamina}
+        onUpdateBoostStamina={setBoostStamina}
+      />
+
+      {gamePhase === 'playing' && (
+        <GameHUD
+          score={score}
+          highScore={highScore}
+          level={level}
+          growthProgress={growthProgress}
+          lives={lives}
+          maxLives={3}
+          boostStamina={boostStamina}
+          isFrenzyActive={isFrenzyActive}
+          isPaused={isPaused}
+          isMuted={isMuted}
+          englishStreak={0}
+          difficulty={difficulty}
+          onToggleDifficulty={() => setDifficulty((d) => (d === 'medium' ? 'hard' : 'medium'))}
+          onTogglePause={() => setIsPaused((p) => !p)}
+          onToggleMute={() => {
+            setIsMuted(!isMuted);
+            soundManager.setMuted(!isMuted);
+          }}
+          onOpenQuestionBank={() => setIsQuestionBankOpen(true)}
+          characterName="Bé Cá Mập Cute"
+        />
+      )}
+
+      {gamePhase === 'select-character' && (
+        <CharacterSelectModal
+          selectedSharkId={selectedSharkId}
+          difficulty={difficulty}
+          onSelectShark={setSelectedSharkId}
+          onChangeDifficulty={setDifficulty}
+          onStartGame={handleStartGame}
+          onOpenQuestionBank={() => setIsQuestionBankOpen(true)}
+        />
+      )}
+
+      {gamePhase === 'game-over' && (
+        <GameOverModal
+          score={score}
+          highScore={highScore}
+          level={level}
+          fishesEaten={0}
+          questionsAnswered={0}
+          questionsCorrect={0}
+          onRestart={handleStartGame}
+          onOpenQuestionBank={() => setIsQuestionBankOpen(true)}
+          onChangeCharacter={() => setGamePhase('select-character')}
+        />
+      )}
+
+      {activeQuestion && caughtPrey && (
+        <QuestionModal
+          question={activeQuestion}
+          preyName={caughtPrey.name}
+          preySrc={caughtPrey.src}
+          onAnswer={handleAnswerQuestion}
+          livesRemaining={lives}
+        />
+      )}
+
+      {isQuestionBankOpen && (
+        <QuestionBankModal
+          questions={questions}
+          onSaveQuestions={(q) => {
+            setQuestions(q);
+            saveQuestions(q);
+          }}
+          onClose={() => setIsQuestionBankOpen(false)}
+          onPreviewQuestion={(q) => {
+            setActiveQuestion(q);
+            setCaughtPrey({ name: 'Cá Sáp Xanh Nhí', src: '/assets/aistudio/image_722e59fa.png' });
+          }}
+        />
+      )}
+    </div>
+  );
+}
